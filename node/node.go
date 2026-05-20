@@ -26,7 +26,7 @@ type Node struct {
 	timeout     time.Duration
 	lifeTimeCtx context.Context
 	listener    net.Listener
-	stopFunc    context.CancelFunc
+	cancelFunc  context.CancelFunc
 	peers       []string
 }
 
@@ -62,6 +62,10 @@ func (node *Node) Start(peers []string) error {
 	node.listener = ln
 
 	log.Printf("node_%d started at %s\n", node.id, node.addr)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	node.lifeTimeCtx = ctx
+	node.cancelFunc = cancel
 	for {
 		conn, err := ln.Accept()
 		if err != nil && errors.Is(err, net.ErrClosed) {
@@ -71,12 +75,12 @@ func (node *Node) Start(peers []string) error {
 			continue
 		}
 
-		log.Println("accpeted connection from", conn.LocalAddr())
+		log.Println("accepted connection from", conn.LocalAddr())
 		peer := peer{
 			conn: conn,
 		}
 
-		handleConn(peer)
+		node.handleConn(peer)
 	}
 
 }
@@ -91,7 +95,13 @@ func (p peer) Read() ([]byte, error) {
 	return buffer[:n], err
 }
 
-func handleConn(peer peer) {
+func (node *Node) Stop() {
+	node.cancelFunc()
+	node.listener.Close()
+	log.Printf("successfully stopped node_%d\n", node.id)
+}
+
+func (node *Node) handleConn(peer peer) {
 	request, err := peer.Read()
 	if err != nil && errors.Is(err, io.EOF) {
 		log.Printf("client has disconnected")

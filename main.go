@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"time"
 )
 
 var (
@@ -41,7 +42,16 @@ func main() {
 				log.Println(err)
 				return
 			}
+
 		})
+	}
+
+	for _, node := range cluster {
+		go func() {
+			time.Sleep(1 * time.Second)
+			log.Println("stopping node")
+			node.Stop()
+		}()
 	}
 
 	wg.Wait()
