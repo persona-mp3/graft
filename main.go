@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"graft/node"
+	"graft/graft"
 	"log"
 	"math/rand"
 	"sync"
