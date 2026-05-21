@@ -24,12 +24,12 @@ func main() {
 		fmt.Printf("cannot create an even cluster of nodes for raft. Using default,  %d nodes\n", defaultNodes)
 	}
 
-	cluster := []*std.Node{}
+	cluster := []*graft.Node{}
 	peerAddress := []string{}
 
 	for i := range nodes {
 		addr := getRandomListenAddr()
-		node := std.CreateNode(i+1, addr)
+		node := graft.CreateNode(i+1, addr)
 
 		cluster = append(cluster, node)
 		peerAddress = append(peerAddress, addr)
