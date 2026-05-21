@@ -7,17 +7,17 @@ import (
 	"log"
 	"math/rand"
 	"sync"
-	"time"
+	// "time"
 )
 
 var (
-	defaultNodes = 3
+	defaultNodes = 2
 )
 
 func main() {
 	var nodes int
 
-	flag.IntVar(&nodes, "nodes", 3, "number of nodes to start in a cluster. By default creates 3 nodes")
+	flag.IntVar(&nodes, "nodes", defaultNodes, "number of nodes to start in a cluster. By default creates 3 nodes")
 	flag.Parse()
 
 	if nodes <= 0 || nodes%2 == 0 {
@@ -46,14 +46,14 @@ func main() {
 		})
 	}
 
-	for _, node := range cluster {
-		go func() {
-			time.Sleep(1 * time.Second)
-			log.Println("stopping node")
-			node.Stop()
-		}()
-	}
-
+	// for _, node := range cluster {
+	// 	go func() {
+	// 		time.Sleep(1 * time.Second)
+	// 		log.Println("stopping node")
+	// 		node.Stop()
+	// 	}()
+	// }
+	//
 	wg.Wait()
 }
 
