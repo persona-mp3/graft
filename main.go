@@ -87,11 +87,16 @@ func (node Node) monitor(ctx context.Context) {
 
 }
 
-// TODO: a node sends heartbeats to itself. although it seems better to
-// not do that, at the moment, that isn't neccessary as of now because we'll
-// also need to tell the node to wait for heartbearts in the handleIncoming(conn)
-// or make the monitor a switch. Actually we can do that. If leader, turn of monitor
-// if Follower turn on monitor, if Candidate turn off monitor
+/*
+TODO: The aim of this comment is to be to remind you that the monitor should
+behave like an off-on switch.
+If this node becomes a Leader, turn off the monitor - done
+If this node becomes a Follower turn on the monitor - done
+If this node becomes a Candidate, turn off the monitor
+notes:
+1. Now, so far you can't turn from Leader -> Follower unless the node is down, or I haven't read the paper through yet.
+2. How long should the election process take?
+*/
 func (node *Node) sendHeartbeats() {
 	log.Printf("[leader]node_%s sending heartbeat as %+v\n", node.id, node.State)
 	ctx, cancel := context.WithCancel(node.lifeCtx)
