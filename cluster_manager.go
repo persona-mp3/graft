@@ -11,6 +11,8 @@ type Cluster struct {
 	nodes []*Node
 }
 
+// note: it would be nice to have this ran in a seprate terminal window
+// because the logging obsfucates everything is overall bad UX
 func (cluster *Cluster) run() {
 	fmt.Println("[cluster-manager] actively running")
 	scanner := bufio.NewScanner(os.Stdin)
@@ -36,11 +38,6 @@ func (cluster *Cluster) run() {
 				fmt.Println("[cluster-manager] could started node ", nodeId)
 			}
 		}
-		// if !strings.Contains(cmd, "kill") {
-		// 	fmt.Println("[cluster-manager] cmd not undertstood")
-		// 	continue
-		// }
-
 	}
 }
 

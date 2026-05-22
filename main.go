@@ -42,8 +42,7 @@ func main() {
 
 func (node Node) monitor(ctx context.Context) {
 	// for every node.electionTimeout
-	// if we dont recv hearbeat println, become candidate
-
+	// if we dont recv hearbeat become candidate
 	ticker := time.NewTicker(node.electionTimeout)
 	defer func() {
 		ticker.Stop()
