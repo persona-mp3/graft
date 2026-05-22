@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -26,18 +26,23 @@ type Node struct {
 	electionTimeout time.Duration
 	resetTimer      chan bool
 	lifeCtx         context.Context
+	cancelCtx       context.CancelFunc
+	ln              net.Listener
+	killMonitor     chan bool
 	State
 }
 
+// Note: the timer here is set to seconds so it can easily be debuged
 func createNode(id string, addr string) *Node {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	duration := (rng.Intn(4) + 1)
+	duration := (rng.Intn(8) + 1)
 	electionTimeout := time.Duration(duration * int(time.Second))
 	return &Node{
 		id:              id,
 		addr:            addr,
 		State:           Follower,
 		resetTimer:      make(chan bool),
+		killMonitor:     make(chan bool),
 		electionTimeout: electionTimeout,
 	}
 }
@@ -53,7 +58,10 @@ func (node *Node) Start(peers []string) {
 	defer cancel()
 
 	node.lifeCtx = ctx
+	node.cancelCtx = cancel
 	node.peers = peers
+	// listener is closed on shutdown via node.Shutdown()
+	node.ln = ln
 
 	go node.monitor(ctx)
 
@@ -115,4 +123,10 @@ func (node *Node) handleIncoming(conn net.Conn) {
 
 		log.Println("revd an odd request>>>", req)
 	}
+}
+
+func (node *Node) Shutdown() {
+	node.cancelCtx()
+	node.ln.Close()
+
 }

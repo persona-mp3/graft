@@ -13,11 +13,42 @@ import (
 	"time"
 )
 
-func (node *Node) monitor(ctx context.Context) {
+func main() {
+	var nodes int
+	flag.IntVar(&nodes, "nodes", 2, "provide number of nodes to run")
+	flag.Parse()
+
+	cluster := []*Node{}
+	peerAddresses := []string{}
+	for i := range nodes {
+		addr := generateRandomListenAddr()
+		node := createNode(fmt.Sprint(i+1), addr)
+		cluster = append(cluster, node)
+		peerAddresses = append(peerAddresses, addr)
+	}
+
+	wg := &sync.WaitGroup{}
+	for _, node := range cluster {
+		wg.Go(func() {
+			node.Start(peerAddresses)
+		})
+	}
+
+	manager := &Cluster{cluster}
+	go manager.run()
+	wg.Wait()
+	log.Println("application done")
+}
+
+func (node Node) monitor(ctx context.Context) {
 	// for every node.electionTimeout
 	// if we dont recv hearbeat println, become candidate
 
 	ticker := time.NewTicker(node.electionTimeout)
+	defer func() {
+		ticker.Stop()
+		log.Println("stopped monitor's ticker")
+	}()
 
 	for {
 		select {
@@ -32,7 +63,7 @@ func (node *Node) monitor(ctx context.Context) {
 				node.State = Leader
 				log.Printf("node_%s turned leader::\n", node.id)
 				// do leader things
-				node.sendHeartbeats()
+				go node.sendHeartbeats()
 				// todo: node.updateTerm()
 			} else {
 				log.Printf("todo: node_%s lost the campaign for this term, become follower or candidate\n", node.id)
@@ -48,21 +79,30 @@ func (node *Node) monitor(ctx context.Context) {
 			}
 			log.Printf("[follower_%s]Reseting electionTimeout\n", node.id)
 			ticker.Reset(node.electionTimeout)
+
+		case <-node.killMonitor:
+			log.Println("killing monitor because 1. currentNode is leader")
+			return
 		}
 	}
 
 }
 
-// TODO(persona): a node sends heartbeats to itself. although it seems better to 
-// not do that, at the moment, that isn't neccessary as of now because we'll 
+// TODO: a node sends heartbeats to itself. although it seems better to
+// not do that, at the moment, that isn't neccessary as of now because we'll
 // also need to tell the node to wait for heartbearts in the handleIncoming(conn)
 // or make the monitor a switch. Actually we can do that. If leader, turn of monitor
 // if Follower turn on monitor, if Candidate turn off monitor
 func (node *Node) sendHeartbeats() {
 	log.Printf("[leader]node_%s sending heartbeat as %+v\n", node.id, node.State)
 	ctx, cancel := context.WithCancel(node.lifeCtx)
+	log.Println("sending message to kill monitor")
+	node.killMonitor <- true
 
 	for _, addr := range node.peers {
+		if addr == node.addr {
+			continue
+		}
 		go func(ctx context.Context, addr string) {
 			ticker := time.NewTicker(node.electionTimeout)
 			defer ticker.Stop()
@@ -163,31 +203,6 @@ func (node *Node) Campaign() bool {
 	wg.Wait()
 	// now we need a way to determine if this node actually won the election
 	return voteCount.Load() > 1
-}
-
-func main() {
-	var nodes int
-	flag.IntVar(&nodes, "nodes", 2, "provide number of nodes to run")
-	flag.Parse()
-
-	cluster := []*Node{}
-	peerAddresses := []string{}
-	for i := range nodes {
-		addr := generateRandomListenAddr()
-		node := createNode(fmt.Sprint(i+1), addr)
-		cluster = append(cluster, node)
-		peerAddresses = append(peerAddresses, addr)
-	}
-
-	wg := &sync.WaitGroup{}
-	for _, node := range cluster {
-		wg.Go(func() {
-			node.Start(peerAddresses)
-		})
-	}
-
-	wg.Wait()
-	log.Println("application done")
 }
 
 func generateRandomListenAddr() string {
