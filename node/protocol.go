@@ -1,18 +1,6 @@
 package node
 
-import (
-	"context"
-	"errors"
-	"net"
-	"net/rpc"
-	"sync"
-)
-
-type Server struct {
-	Addr   string
-	mu     sync.Mutex
-	node   *Node
-}
+import "fmt"
 
 type RequestVoteArgs struct {
 	Id       string
@@ -21,10 +9,9 @@ type RequestVoteArgs struct {
 }
 
 type ResponseVote struct {
-	Id          string
-	RecvdVote   bool
+	Id        string
+	RecvdVote bool
 }
-
 
 type HeartBeatRequest struct {
 	From string
@@ -36,65 +23,22 @@ type HeartBeatResponse struct {
 	Term int
 }
 
-
-func CreateServer(addr string, node *Node) *Server {
-	return &Server {
-		Addr:   addr,
-		mu:     sync.Mutex{},
-		node:   node,
-	}
+func (req *RequestVoteArgs) toString() string {
+	return fmt.Sprintf("RequestVoteArgs { Id: %s, Term: %d, LogCount: %d }",
+		req.Id, req.Term, req.LogCount,
+	)
 }
 
-/*
- So inside here is where the first leader election process will reside. 
- 1. Set a heartBeat timer, if the timer fires, this node becomes candidate
- */
-func (s *Server) RequestVote(req *RequestVoteArgs, res *ResponseVote) error {
-	res.Id = s.node.Id
-	res.RecvdVote = true
-	return nil
+func (res *ResponseVote) toString() string {
+	return fmt.Sprintf("ResponseVote { Id: %s, RecvdVote: %t}",
+		res.Id, res.RecvdVote,
+	)
 }
 
-
-func (s *Server) Ping(req HeartBeatRequest, res *HeartBeatResponse) error {
-	res.From = s.node.Id
-	res.Term = s.node.GetTerm()
-	s.node.RecvdHeartBeatCh <- true
-	return nil
+func (req *HeartBeatRequest) toString() string {
+	return fmt.Sprintf("HeartBeatRequest: {From: %s, Term: %d}", req.From, req.Term)
 }
 
-
-
-func (s *Server) Run() {
-	if err := rpc.Register(s); err != nil {
-		lgr.Fatalf("Could not register rcp for Node_%s. Reason: %s\n", s.node.Id, err)
-	}
-
-	ln, err := net.Listen("tcp", s.Addr) 
-	if err != nil {
-		lgr.Fatalf("Could not start tcp server for Node_%s at %s. Reason: ", s.node.Id, s.node.Addr,  err)
-	}
-
-	lgr.Printf("%s listening on %s", s.node.Id, s.Addr)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.node.Start(ctx)
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				lgr.Printf("%s server has been shutdown\n", s.node.Id)
-				return
-			}
-
-			lgr.Printf("%s could not accept connection. Reason: %s\n", s.node.Id, err )
-			continue
-		}
-
-		lgr.Printf("%s accepted connection from: %s\n", s.node.Id, conn.LocalAddr())
-		rpc.ServeConn(conn)
-		
-	}
-
+func (res *HeartBeatResponse) toString() string {
+	return fmt.Sprintf("HeartBeatRequest: {From: %s, Term: %d}", res.From, res.Term)
 }

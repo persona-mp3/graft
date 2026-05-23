@@ -3,15 +3,16 @@ package node
 import (
 	"context"
 	"fmt"
+	"github.com/persona-mp3/logger"
 	"math/rand"
+	"net/rpc"
 	"sync"
 	"sync/atomic"
-	"github.com/persona-mp3/logger"
 	"time"
 )
 
 var (
-	lgr  = logger.NewLogger(nil)
+	lgr = logger.NewLogger(nil)
 )
 
 const (
@@ -20,10 +21,11 @@ const (
 )
 
 type State int
+
 const (
 	Leader State = iota
 	Candidate
-	Follower 
+	Follower
 )
 
 // not sure if i want to use a mutex here later for the State
@@ -36,34 +38,39 @@ type Node struct {
 	RecvdHeartBeatCh     chan bool
 	transitionToFollower chan bool
 	ElectionTimeout      time.Duration
+	logCount             int
 	State
 }
 
-func randomNumberGenerator() int{
-	seed := time.Now().UnixNano()
-	rng := rand.New(rand.NewSource(seed))
-	return rng.Intn(500) + 100
+
+var (
+	seed = time.Now().UnixNano()
+	rng = rand.New(rand.NewSource(seed))
+)
+func randomNumberGenerator(limit int) int {
+	return rng.Intn(limit) + 1
 }
 
-
-func CreateNode(id string, peers []string) *Node {
- electionTimeout := time.Duration(randomNumberGenerator()) * time.Second
-
-	return &Node {
-		Id:                  id, 
-		Peers:               peers, 
-		term:                atomic.Int64{},
-		HeartBeat:           time.Duration(time.Millisecond * heartBeatInterval),
-		RecvdHeartBeatCh:    make(chan bool, 100), 
-		ElectionTimeout:     electionTimeout, 
-		State:               Follower,
+func CreateNode(id string, addr string, peers []string) *Node {
+	electionTimeout := time.Duration(randomNumberGenerator(6)) * time.Second
+	// for easier debugging
+	heartBeatTimeout := time.Duration(randomNumberGenerator(4)) * time.Second
+	return &Node{
+		Id:                   id,
+		Peers:                peers,
+		Addr:                 addr,
+		term:                 atomic.Int64{},
+		HeartBeat:            heartBeatTimeout,
+		RecvdHeartBeatCh:     make(chan bool, 100),
+		transitionToFollower: make(chan bool, 100),
+		ElectionTimeout:      electionTimeout,
+		State:                Follower,
 	}
 }
 
-
 // 1. Start the timer to watch for the heartbeats
-func (node *Node) Start(ctx context.Context){
-	transitionToLeader := make(chan bool)	
+func (node *Node) Start(ctx context.Context) {
+	transitionToLeader := make(chan bool)
 	transitionToFollower := make(chan bool)
 
 	killLeader := make(chan bool)
@@ -75,13 +82,13 @@ func (node *Node) Start(ctx context.Context){
 	for {
 		select {
 		case <-ctx.Done():
-			return 
+			return
 		case <-transitionToLeader:
 			lgr.Println("transitioned into leader state, sending heartbeats")
 			lgr.Println("status", node.GetStatus())
 			wg.Add(1)
 			go func() {
-				defer func (){
+				defer func() {
 					wg.Done()
 					lgr.Println("stopped leader-routine")
 				}()
@@ -89,15 +96,17 @@ func (node *Node) Start(ctx context.Context){
 				node.sendHeartBeats(killLeader)
 			}()
 		case <-transitionToFollower:
+			if node.State == Leader {
+				killLeader <- true
+			}
 			node.updateTerm()
 			node.updateState(Follower)
-			killLeader <- true
 
 			wg.Add(1)
-			go func (){
-				defer func(){
-					wg.Done()	
-					lgr.Println("dropped moinitor-routine")
+			go func() {
+				defer func() {
+					wg.Done()
+					lgr.Println("dropped monitor-routine")
 				}()
 				node.monitorHeartBeats(transitionToLeader)
 			}()
@@ -105,29 +114,58 @@ func (node *Node) Start(ctx context.Context){
 	}
 }
 
-
 func (node *Node) sendHeartBeats(offswitch <-chan bool) {
-	for {
-		select {
-		case <-offswitch:
-			return
-		default:
-			time.Sleep(10 * time.Second)
-			lgr.Println("sent all heartbeats")
+
+	wg := sync.WaitGroup{}
+
+	for _, peer := range node.Peers {
+		if peer == node.Addr {
+			continue
 		}
+
+		wg.Add(1)
+		go func(peer string) {
+			ticker := time.NewTicker(node.HeartBeat)
+			defer func() {
+				wg.Done()
+				ticker.Stop()
+			}()
+
+			client, err := rpc.Dial("tcp", peer)
+			if err != nil {
+				lgr.Printf("could not dial Follower. Reason: %s\n", err)
+				return
+			}
+
+			for {
+				select {
+				case <-offswitch:
+					return
+				case <-ticker.C:
+					req := HeartBeatRequest{From: node.Id, Term: node.GetTerm()}
+					res := &HeartBeatResponse{}
+					if err := client.Call("Server.Ping", req, res); err != nil {
+						lgr.Printf("could not get pong from Follower. Reason: %s\n", err)
+						return
+					}
+					lgr.Printf("PingResponse from Follower_%s-> %+v\n", peer, res.toString())
+					ticker.Reset(node.HeartBeat)
+				}
+			}
+		}(peer)
 	}
+
+	wg.Wait()
 }
 
-
-
-func (node *Node) monitorHeartBeats(transition chan<- bool){
+func (node *Node) monitorHeartBeats(transition chan<- bool) {
 	ticker := time.NewTicker(node.HeartBeat)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			lgr.Printf("%s turning into candidate. Heartbeat not met in %+v\n", node.Id, node.HeartBeat )
+			lgr.Printf("%s turning into candidate. Heartbeat not met in %+v\n", node.Id, node.HeartBeat)
 			node.updateTerm()
 			node.updateState(Candidate)
 			lgr.Println(node.GetStatus())
@@ -137,7 +175,7 @@ func (node *Node) monitorHeartBeats(transition chan<- bool){
 				node.updateState(Leader)
 				transition <- true
 				return
-			} else { 
+			} else {
 				lgr.Printf("%s lost campaign, sending transit to become a follower\n", node.Id)
 				node.transitionToFollower <- true
 			}
@@ -148,36 +186,88 @@ func (node *Node) monitorHeartBeats(transition chan<- bool){
 		}
 	}
 
-	lgr.Printf("%s starting heartbeat monitor...\n", node.Id)
 }
 
-
+// TODO: Add an election timer here
 func (node *Node) Campaign() bool {
 	failedConns := atomic.Int64{}
 	totalPeers := len(node.Peers)
+
+	successfulVotes := atomic.Int64{}
+	failedVotes := atomic.Int64{}
+
+	// Nodes/servers can vote themseleves
+	successfulVotes.Add(1)
 
 	if totalPeers == 0 {
 		lgr.Printf("warning: %s has no peers or nodes started along side with it becoming leader\n", node.Id)
 		return true
 	}
 
-	
 	wg := &sync.WaitGroup{}
-	_ = wg
+	for _, peer := range node.Peers {
+		if peer == node.Addr {
+			continue
+		}
+		wg.Add(1)
+		go func(peer string) {
+			defer func() {
+				wg.Done()
+			}()
+
+			client, err := rpc.Dial("tcp", peer)
+			if err != nil {
+				lgr.Printf("%s could not dial %s. Reason: %s\n", node.Id, peer, err)
+				failedConns.Add(1)
+				return
+			}
+
+			req := RequestVoteArgs{
+				Id:       node.Id,
+				Term:     node.GetTerm(),
+				LogCount: node.logCount,
+			}
+
+			res := &ResponseVote{}
+
+			if err := client.Call("Server.RequestVote", req, res); err != nil {
+				lgr.Printf("%s could not call rpcMethod: server.RequestVote on %s. Reason: %s\n", node.Id, peer, err)
+				return
+			}
+
+			if res.RecvdVote {
+				lgr.Printf("%s recvd valid vote: %s\n", node.Id, res.toString())
+				successfulVotes.Add(1)
+			} else {
+				lgr.Printf("%s recvd negative vote: %s\n", node.Id, res.toString())
+				failedVotes.Add(1)
+			}
+		}(peer)
+	}
+
 	// Election logic here
 
+	wg.Wait()
+
 	if int(failedConns.Load()) == totalPeers {
-		lgr.Printf("warning: all peers appeared to have to failed from %s perspective. Check cluter\n", node.Id)
+		lgr.Printf("warning: all peers appeared to have to failed from %s perspective. Check cluster\n", node.Id)
 		return true
 	}
-	
 
-	// Tally votes
-	lgr.Printf("%s is running for president\n", node.Id)
-	time.Sleep(5 * 3 * time.Second)
+	// TODO(persona): Heres the thing, what if two people become leaders at the same time?
+	// thats why there it's advised to always be an odd number of nodes. But that still dosen't
+	// stop it yet. You can have 5 nodes in a cluster, and maybe 3 become candidates, now two nodes
+	// can end up as leaders and how do we resolve that?
+
+	tally := successfulVotes.Load()
+	if tally > 1 && failedVotes.Load() < tally {
+		lgr.Printf("%s is running for president\n", node.Id)
+		return true
+	}
+
+	lgr.Printf("%s is dropping to Follower. FailedVotes: %d, Success: %d\n", node.Id, failedVotes.Load(), tally)
 	return false
 }
-
 
 func (node *Node) GetStatus() string {
 	fmt := fmt.Sprintf("Status: {Id: %s, State: %s, Term: %d}", node.Id, node.getState(), node.GetTerm())
@@ -197,16 +287,14 @@ func (node *Node) getState() string {
 	}
 }
 
-
-func (node *Node) updateTerm(){
+func (node *Node) updateTerm() {
 	node.term.Add(1)
 }
 
-func (node *Node) GetTerm() int{
+func (node *Node) GetTerm() int {
 	return int(node.term.Load())
 }
 
-func (node *Node) updateState(state State){
+func (node *Node) updateState(state State) {
 	node.State = state
 }
-
