@@ -1,8 +1,9 @@
 package node
 
 import (
-	"net"
+	"context"
 	"errors"
+	"net"
 	"net/rpc"
 	"sync"
 )
@@ -25,6 +26,17 @@ type ResponseVote struct {
 }
 
 
+type HeartBeatRequest struct {
+	From string
+	Term int
+}
+
+type HeartBeatResponse struct {
+	From string
+	Term int
+}
+
+
 func CreateServer(addr string, node *Node) *Server {
 	return &Server {
 		Addr:   addr,
@@ -33,11 +45,24 @@ func CreateServer(addr string, node *Node) *Server {
 	}
 }
 
+/*
+ So inside here is where the first leader election process will reside. 
+ 1. Set a heartBeat timer, if the timer fires, this node becomes candidate
+ */
 func (s *Server) RequestVote(req *RequestVoteArgs, res *ResponseVote) error {
 	res.Id = s.node.Id
 	res.RecvdVote = true
 	return nil
 }
+
+
+func (s *Server) Ping(req HeartBeatRequest, res *HeartBeatResponse) error {
+	res.From = s.node.Id
+	res.Term = s.node.GetTerm()
+	s.node.RecvdHeartBeatCh <- true
+	return nil
+}
+
 
 
 func (s *Server) Run() {
@@ -51,6 +76,10 @@ func (s *Server) Run() {
 	}
 
 	lgr.Printf("%s listening on %s", s.node.Id, s.Addr)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.node.Start(ctx)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

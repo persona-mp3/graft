@@ -18,4 +18,5 @@ func NewLogger(cfg *Config) *log.Logger{
 		return log.New(os.Stdout, "", log.Lshortfile)
 	}
 	return log.New(cfg.Stdout, cfg.Prefix, cfg.Flags)
+
 }
