@@ -40,5 +40,5 @@ func (req *HeartBeatRequest) toString() string {
 }
 
 func (res *HeartBeatResponse) toString() string {
-	return fmt.Sprintf("HeartBeatRequest: {From: %s, Term: %d}", res.From, res.Term)
+	return fmt.Sprintf("HeartBeatResponse: {From: %s, Term: %d}", res.From, res.Term)
 }

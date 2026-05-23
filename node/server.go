@@ -24,20 +24,58 @@ func CreateServer(addr string, node *Node) *Server {
 
 /*
 So inside here is where the first leader election process will reside.
-1. Set a heartBeat timer, if the timer fires, this node becomes candidate
 */
+// Becomes a Follower to this a Leader when the Leaders term is higher && the Term is higher
 func (s *Server) RequestVote(req RequestVoteArgs, res *ResponseVote) error {
 
-	if (s.node.State == Candidate || s.node.State == Follower ) && s.node.GetTerm() < req.Term {
-		lgr.Println("dropping from inside while candid|follower")
-		res.Id = s.node.Id
-		res.RecvdVote = true
-		s.node.RecvdHeartBeatCh <- true
-		s.node.updateTerm()
-		lgr.Printf("%s's vote got requested: %s\n", s.node.Id, req.toString())
-		return nil
+	// There are going to me more criterias to this lateron
+	switch s.node.State {
+	case Candidate:
+		if req.LogCount > s.node.logCount || req.Term > s.node.GetTerm() {
+			res.Id = s.node.Id
+			res.RecvdVote = true
+			s.node.RecvdHeartBeatCh <- true
+			s.node.updateTerm()
+			lgr.Printf("%s's vote got requested: %s\n", s.node.Id, req.toString())
+			return nil
+		}
+
+	case Leader:
+		if req.LogCount > s.node.logCount && req.Term > s.node.GetTerm() {
+			res.Id = s.node.Id
+			res.RecvdVote = true
+			s.node.transitionToFollower <- struct{}{}
+			lgr.Printf("%s is stepped down from Leader to Follower. Gave vote to: %s\n",
+				s.node.Id, req.toString(),
+			)
+			return nil
+		}
+
+	case Follower:
+		if req.LogCount > s.node.logCount || req.Term > s.node.GetTerm() {
+			res.Id = s.node.Id
+			res.RecvdVote = true
+			s.node.RecvdHeartBeatCh <- true
+			s.node.updateTerm()
+			lgr.Printf("%s's vote got requested: %s\n", s.node.Id, req.toString())
+			return nil
+		}
 	}
 
+	// if (s.node.State == Candidate || s.node.State == Follower) &&
+	// 	req.Term > s.node.GetTerm() &&
+	// 	req.LogCount > s.node.logCount {
+	// 	res.Id = s.node.Id
+	// 	res.RecvdVote = true
+	// 	s.node.RecvdHeartBeatCh <- true
+	// 	s.node.updateTerm()
+	// 	lgr.Printf("%s's vote got requested: %s\n", s.node.Id, req.toString())
+	// 	return nil
+	// }
+
+	lgr.Printf("debug:: none of the criteias met. %s, %s, %s\n",
+		req.toString(), res.toString(), s.node.GetStatus(),
+	)
 	return nil
 }
 

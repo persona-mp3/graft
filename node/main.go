@@ -36,7 +36,7 @@ type Node struct {
 	Peers                []string
 	HeartBeat            time.Duration
 	RecvdHeartBeatCh     chan bool
-	transitionToFollower chan bool
+	transitionToFollower chan any
 	ElectionTimeout      time.Duration
 	logCount             int
 	State
@@ -62,19 +62,20 @@ func CreateNode(id string, addr string, peers []string) *Node {
 		term:                 atomic.Int64{},
 		HeartBeat:            heartBeatTimeout,
 		RecvdHeartBeatCh:     make(chan bool, 100),
-		transitionToFollower: make(chan bool, 100),
+		transitionToFollower: make(chan any, 100),
 		ElectionTimeout:      electionTimeout,
 		State:                Follower,
 	}
 }
 
-// 1. Start the timer to watch for the heartbeats
 func (node *Node) Start(ctx context.Context) {
 	transitionToLeader := make(chan bool)
 	transitionToFollower := make(chan bool)
 
 	killLeader := make(chan bool)
 
+	// Start the timer to watch for the initial heartbeat, if this node recvs a heartbeat before it becomes a Candidate
+	// this is used to monitor the heartbeat and the bottom loop will never run
 	go node.monitorHeartBeats(transitionToLeader)
 
 	wg := &sync.WaitGroup{}
@@ -92,12 +93,17 @@ func (node *Node) Start(ctx context.Context) {
 					wg.Done()
 					lgr.Println("stopped leader-routine")
 				}()
+
 				lgr.Println("starting leader-routine")
 				node.sendHeartBeats(killLeader)
 			}()
+			// if this Node currently stepped down from a Leader position, the Server will inform it
 		case <-transitionToFollower:
 			if node.State == Leader {
-				killLeader <- true
+				for i := range len(node.Peers) {
+					_ = i
+					killLeader <- true
+				}
 			}
 			node.updateTerm()
 			node.updateState(Follower)
@@ -112,6 +118,7 @@ func (node *Node) Start(ctx context.Context) {
 			}()
 		}
 	}
+
 }
 
 func (node *Node) sendHeartBeats(offswitch <-chan bool) {
@@ -177,7 +184,7 @@ func (node *Node) monitorHeartBeats(transition chan<- bool) {
 				return
 			} else {
 				lgr.Printf("%s lost campaign, sending transit to become a follower\n", node.Id)
-				node.transitionToFollower <- true
+				node.transitionToFollower <- struct{}{}
 			}
 			return
 		case <-node.RecvdHeartBeatCh:
