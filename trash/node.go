@@ -35,7 +35,7 @@ type Node struct {
 // Note: the timer here is set to seconds so it can easily be debuged
 func createNode(id string, addr string) *Node {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	duration := (rng.Intn(8) + 1)
+	duration := (rng.IntN(8) + 1)
 	electionTimeout := time.Duration(duration * int(time.Second))
 	return &Node{
 		id:              id,
