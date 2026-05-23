@@ -65,6 +65,7 @@ func (node *Node) Start(peers []string) {
 
 	go node.monitor(ctx)
 
+	// TODO: Server with rcp instead
 	log.Printf("node_%s started at tcp:%s\n", node.id, node.addr)
 	for {
 		conn, err := ln.Accept()
