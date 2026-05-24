@@ -1,62 +1,53 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"graft/node"
-	"log"
 	"math/rand"
+	"fmt"
+	"flag"
 	"sync"
-	"time"
+	graft "github.com/persona-mp3/node"
 )
 
 var (
-	defaultNodes = 3
+	defaultInstances = 2
 )
 
-func main() {
-	var nodes int
 
-	flag.IntVar(&nodes, "nodes", 3, "number of nodes to start in a cluster. By default creates 3 nodes")
+func main() {
+	var instances int
+	flag.IntVar(&instances, "instances", defaultInstances, "number of instances to run in a cluster. Default is 2")
 	flag.Parse()
 
-	if nodes <= 0 || nodes%2 == 0 {
-		fmt.Printf("cannot create an even cluster of nodes for raft. Using default,  %d nodes\n", defaultNodes)
+	addrs := []string{}
+	for i := range instances {
+		_ = i
+		addrs = append(addrs, generateRandomListenAddr())
 	}
 
-	cluster := []*graft.Node{}
-	peerAddress := []string{}
-
-	for i := range nodes {
-		addr := getRandomListenAddr()
-		node := graft.CreateNode(i+1, addr)
-
-		cluster = append(cluster, node)
-		peerAddress = append(peerAddress, addr)
+	cluster := []*graft.Server{}
+	for id, addr := range addrs {
+		node := graft.CreateNode(fmt.Sprintf("%d", id+1), addr,  addrs)
+		server := graft.CreateServer(addr, node)
+		cluster = append(cluster, server)
 	}
 
-	wg := sync.WaitGroup{}
-	for _, node := range cluster {
-		wg.Go(func() {
-			if err := node.Start(peerAddress); err != nil {
-				log.Println(err)
-				return
-			}
+	wg := &sync.WaitGroup{}
 
-		})
+	for _, server := range cluster {
+		wg.Add(1)
+		go func(server *graft.Server){
+			defer wg.Done()
+			server.Run()
+		}(server)
 	}
 
-	for _, node := range cluster {
-		go func() {
-			time.Sleep(1 * time.Second)
-			log.Println("stopping node")
-			node.Stop()
-		}()
-	}
+
 
 	wg.Wait()
+
 }
 
-func getRandomListenAddr() string {
-	return fmt.Sprintf("127.0.0.1:%d", rand.Intn(50000)+10000)
+func generateRandomListenAddr() string {
+	return fmt.Sprintf("127.0.0.1:%d", rand.Intn(5000)+1000)
 }
+
